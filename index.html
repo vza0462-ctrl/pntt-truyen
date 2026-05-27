@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phàm Nhân Tu Tiên - Đọc Truyện</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    background: #f5f0e8;
+    color: #2c2c2c;
+    min-height: 100vh;
+  }
+
+  /* HEADER */
+  .header {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    color: #e0d8c8;
+    padding: 16px 20px;
+    text-align: center;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+  }
+  .header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #f0e6d3;
+  }
+  .header p {
+    font-size: 13px;
+    color: #a0a0b0;
+    margin-top: 4px;
+  }
+
+  /* TOP NAV */
+  .top-nav {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    background: #e8e0d0;
+    align-items: center;
+    flex-wrap: wrap;
+    border-bottom: 1px solid #ccc;
+  }
+  .top-nav label {
+    font-size: 14px;
+    font-weight: 600;
+    color: #555;
+    margin-right: 4px;
+  }
+  .top-nav select {
+    flex: 1;
+    min-width: 160px;
+    max-width: 300px;
+    padding: 8px 10px;
+    font-size: 14px;
+    border: 1px solid #bbb;
+    border-radius: 6px;
+    background: #fff;
+    font-family: inherit;
+  }
+  .top-nav .info {
+    font-size: 13px;
+    color: #777;
+    margin-left: auto;
+  }
+
+  /* BUTTONS */
+  .btn {
+    padding: 8px 18px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+  .btn-primary { background: #0f3460; color: #f0e6d3; }
+  .btn-primary:hover { background: #1a4a7a; }
+  .btn-secondary { background: #6c757d; color: #fff; }
+  .btn-secondary:hover { background: #5a6268; }
+  .btn-success { background: #1b6b3a; color: #fff; }
+  .btn-success:hover { background: #218838; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* CHAPTER CONTENT */
+  .chapter-container {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 30px 20px 60px;
+  }
+  .chapter-title {
+    text-align: center;
+    font-size: 26px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 8px;
+    line-height: 1.3;
+  }
+  .chapter-meta {
+    text-align: center;
+    font-size: 13px;
+    color: #999;
+    margin-bottom: 30px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #ddd;
+  }
+  .chapter-content {
+    font-size: 18px;
+    line-height: 1.9;
+    text-align: justify;
+    color: #2c2c2c;
+  }
+  .chapter-content p {
+    margin-bottom: 16px;
+    text-indent: 30px;
+  }
+  .chapter-content .dialogue {
+    text-indent: 0;
+    padding-left: 20px;
+    color: #3a3a5a;
+  }
+
+  /* NAV BOTTOM */
+  .chapter-nav-buttons {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 2px solid #ddd;
+  }
+  .chapter-nav-buttons .btn {
+    min-width: 120px;
+    text-align: center;
+    padding: 12px 20px;
+    font-size: 15px;
+  }
+  .chapter-nav-buttons .center-info {
+    font-size: 14px;
+    color: #888;
+    text-align: center;
+  }
+  .chapter-nav-buttons input {
+    width: 70px;
+    padding: 8px;
+    text-align: center;
+    border: 1px solid #bbb;
+    border-radius: 6px;
+    font-size: 14px;
+  }
+
+  /* LOADING */
+  .loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 300px;
+    font-size: 18px;
+    color: #999;
+  }
+  .loading .spinner {
+    width: 40px; height: 40px;
+    border: 4px solid #ddd;
+    border-top: 4px solid #0f3460;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-right: 12px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* RESPONSIVE */
+  @media (max-width: 600px) {
+    .chapter-container { padding: 16px 14px 40px; }
+    .chapter-title { font-size: 20px; }
+    .chapter-content { font-size: 16px; line-height: 1.8; }
+    .top-nav { flex-direction: column; align-items: stretch; }
+    .top-nav select { max-width: none; }
+    .top-nav .info { margin-left: 0; text-align: center; }
+    .chapter-nav-buttons { flex-wrap: wrap; justify-content: center; }
+    .chapter-nav-buttons .btn { min-width: 100px; font-size: 13px; padding: 10px 14px; }
+    .header h1 { font-size: 18px; }
+  }
+
+  .fade-in { animation: fadeIn 0.3s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📖 Phàm Nhân Tu Tiên</h1>
+  <p>Tác giả: Vong Ngữ · <span id="totalDisplay">đang tải...</span></p>
+</div>
+
+<div class="top-nav">
+  <label for="chapterSelect">Chương:</label>
+  <select id="chapterSelect"></select>
+  <button class="btn btn-primary" onclick="goToChapter()">📂 Đọc</button>
+  <span class="info" id="progressInfo">-</span>
+</div>
+
+<div class="chapter-container" id="app">
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    <span>Đang tải dữ liệu...</span>
+  </div>
+</div>
+
+<script>
+// State
+let allChapters = [];
+let currentIndex = -1;
+
+// Load data
+async function loadData() {
+  try {
+    // Try full file first, then partial
+    let resp = await fetch('data/all_chapters_full.json');
+    if (!resp.ok) throw new Error('Full not ready');
+    allChapters = await resp.json();
+  } catch(e) {
+    try {
+      let resp = await fetch('data/all_chapters_partial.json');
+      allChapters = await resp.json();
+    } catch(e2) {
+      showError('Không thể tải dữ liệu. Vui lòng refresh lại.');
+      return;
+    }
+  }
+  
+  if (!allChapters || allChapters.length === 0) {
+    showError('Dữ liệu trống.');
+    return;
+  }
+  
+  // Sort by chapter number
+  allChapters.sort((a, b) => a.c - b.c);
+  
+  document.getElementById('totalDisplay').textContent = `${allChapters.length} chương`;
+  populateSelect();
+  
+  // Check URL hash for chapter
+  const hash = parseInt(window.location.hash.replace('#', ''));
+  if (hash && !isNaN(hash)) {
+    const idx = allChapters.findIndex(ch => ch.c === hash);
+    if (idx >= 0) {
+      currentIndex = idx;
+      renderChapter();
+      document.getElementById('chapterSelect').value = hash;
+      return;
+    }
+  }
+  
+  // Default to chapter 1
+  loadChapter(1);
+}
+
+function populateSelect() {
+  const sel = document.getElementById('chapterSelect');
+  sel.innerHTML = '';
+  allChapters.forEach(ch => {
+    const opt = document.createElement('option');
+    opt.value = ch.c;
+    opt.textContent = `Chương ${ch.c}: ${ch.t || ''}`;
+    sel.appendChild(opt);
+  });
+}
+
+function loadChapter(num) {
+  const idx = allChapters.findIndex(ch => ch.c === num);
+  if (idx >= 0) {
+    currentIndex = idx;
+    renderChapter();
+    document.getElementById('chapterSelect').value = num;
+    window.location.hash = num;
+    window.scrollTo(0, 0);
+  } else {
+    showError(`Chương ${num} không có trong dữ liệu.`);
+  }
+}
+
+function goToChapter() {
+  const val = parseInt(document.getElementById('chapterSelect').value);
+  if (val) loadChapter(val);
+}
+
+function renderChapter() {
+  if (currentIndex < 0 || currentIndex >= allChapters.length) return;
+  
+  const ch = allChapters[currentIndex];
+  const app = document.getElementById('app');
+  
+  // Format content: split by paragraphs and dialogue
+  let paragraphs = ch.n.split('\n').filter(p => p.trim());
+  let contentHtml = paragraphs.map(p => {
+    const trimmed = p.trim();
+    return `<p>${trimmed}</p>`;
+  }).join('\n');
+  
+  app.innerHTML = `
+    <div class="fade-in">
+      <div class="chapter-title">Chương ${ch.c}${ch.t ? ': ' + ch.t : ''}</div>
+      <div class="chapter-meta">Trang ${ch.c} / ${allChapters.length}</div>
+      <div class="chapter-content">${contentHtml}</div>
+      
+      <div class="chapter-nav-buttons">
+        <button class="btn btn-secondary" onclick="prevChapter()" ${currentIndex <= 0 ? 'disabled' : ''}>◀ Chương trước</button>
+        
+        <div class="center-info">
+          <input type="number" id="jumpInput" value="${ch.c}" min="1" max="${allChapters.length}" 
+                 onkeydown="if(event.key==='Enter')jumpToChapter()">
+          <button class="btn btn-success btn-xs" onclick="jumpToChapter()" style="padding:6px 12px;font-size:13px;">🔍</button>
+          <br><small>Chương ${currentIndex+1}/${allChapters.length}</small>
+        </div>
+        
+        <button class="btn btn-secondary" onclick="nextChapter()" ${currentIndex >= allChapters.length - 1 ? 'disabled' : ''}>Chương sau ▶</button>
+      </div>
+    </div>
+  `;
+  
+  document.getElementById('progressInfo').textContent = `Chương ${ch.c} / ${allChapters.length}`;
+}
+
+function prevChapter() {
+  if (currentIndex > 0) {
+    currentIndex--;
+    const ch = allChapters[currentIndex];
+    loadChapter(ch.c);
+  }
+}
+
+function nextChapter() {
+  if (currentIndex < allChapters.length - 1) {
+    currentIndex++;
+    const ch = allChapters[currentIndex];
+    loadChapter(ch.c);
+  }
+}
+
+function jumpToChapter() {
+  const val = parseInt(document.getElementById('jumpInput').value);
+  if (val && val >= 1 && val <= allChapters.length) {
+    loadChapter(val);
+  }
+}
+
+// Keyboard navigation
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft') prevChapter();
+  if (e.key === 'ArrowRight') nextChapter();
+});
+
+function showError(msg) {
+  document.getElementById('app').innerHTML = `<div style="text-align:center;padding:80px 20px;color:#c00;font-size:18px;">${msg}</div>`;
+}
+
+// Start
+loadData();
+</script>
+
+</body>
+</html>
