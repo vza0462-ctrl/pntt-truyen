@@ -13,6 +13,69 @@ const state = {
 const $ = id => document.getElementById(id);
 const app = $('app');
 
+// ===== PERSISTENT READING PROGRESS =====
+const PROGRESS_KEY = 'pntt_progress';
+
+/**
+ * Lưu tiến trình đọc (chương + vị trí scroll) xuống localStorage.
+ * Gọi mỗi lần scroll (debounced) và khi rời trang.
+ */
+function saveProgress() {
+  if (!state.currentChapter) return;
+  
+  const scrollY = window.scrollY;
+  const docHeight = Math.max(
+    document.body.scrollHeight,
+    document.body.offsetHeight,
+    document.documentElement.clientHeight,
+    document.documentElement.scrollHeight
+  );
+  
+  const progress = {
+    chapter: state.currentChapter.c,
+    scrollY: scrollY,
+    docHeight: docHeight,
+    savedAt: Date.now(),
+  };
+  
+  try {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+  } catch (e) {
+    // localStorage may be full; ignore silently
+  }
+}
+
+/** Đọc tiến trình từ localStorage */
+function loadProgress() {
+  try {
+    const raw = localStorage.getItem(PROGRESS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Xoá tiến trình nếu muốn reset */
+function clearProgress() {
+  localStorage.removeItem(PROGRESS_KEY);
+}
+
+// Debounced save — chỉ lưu sau 500ms kể từ lần scroll cuối
+let _saveTimeout = null;
+function debouncedSaveProgress() {
+  if (_saveTimeout) clearTimeout(_saveTimeout);
+  _saveTimeout = setTimeout(saveProgress, 500);
+}
+
+// Lưu ngay lập tức (dùng khi chuyển chương / rời trang)
+function saveProgressNow() {
+  if (_saveTimeout) {
+    clearTimeout(_saveTimeout);
+    _saveTimeout = null;
+  }
+  saveProgress();
+}
+
 // ===== INIT =====
 async function init() {
   // Load theme
@@ -32,8 +95,9 @@ async function init() {
     $('totalChapters').textContent = total;
     $('totalChars').textContent = (totalChars / 1000).toFixed(0) + 'k';
     
-    // Load last read
-    const lastRead = localStorage.getItem('pntt_lastRead');
+    // Load last read progress (chapter tracking only for home page display)
+    const savedProgress = loadProgress();
+    const lastRead = savedProgress ? savedProgress.chapter : localStorage.getItem('pntt_lastRead');
     if (lastRead) {
       $('lastReadInfo').innerHTML = `📖 Đang đọc: <strong>Chương ${lastRead}</strong>`;
       $('continueBtn').style.display = 'inline-block';
@@ -64,7 +128,8 @@ function showChapterList() {
 }
 
 function startReading() {
-  const lastRead = localStorage.getItem('pntt_lastRead');
+  const savedProgress = loadProgress();
+  const lastRead = savedProgress ? savedProgress.chapter : localStorage.getItem('pntt_lastRead');
   if (lastRead) {
     goToChapter(parseInt(lastRead));
   } else {
@@ -73,8 +138,9 @@ function startReading() {
 }
 
 function continueReading() {
-  const lastRead = parseInt(localStorage.getItem('pntt_lastRead'));
-  if (lastRead) goToChapter(lastRead);
+  const savedProgress = loadProgress();
+  const lastRead = savedProgress ? savedProgress.chapter : localStorage.getItem('pntt_lastRead');
+  if (lastRead) goToChapter(parseInt(lastRead));
 }
 
 // ===== CHAPTER LIST =====
@@ -191,9 +257,14 @@ async function goToChapter(num) {
 }
 
 function renderChapter(ch) {
+  // Save current chapter's scroll before switching (if applicable)
+  if (state.currentChapter) {
+    saveProgressNow();
+  }
+  
   state.currentChapter = ch;
   
-  // Save progress
+  // Save progress (chapter number using old key for backward compat)
   localStorage.setItem('pntt_lastRead', ch.c);
   window.location.hash = ch.c;
   
@@ -214,11 +285,42 @@ function renderChapter(ch) {
   const pct = ((ch.c - 1) / (total - 1)) * 100;
   document.querySelector('.reader-progress').style.setProperty('--progress', pct + '%');
   
-  // Scroll to top
-  window.scrollTo(0, 0);
-  
-  // Update font size
+  // Apply font size first so dimensions are correct
   applyFontSize();
+  
+  // Restore scroll position if this chapter was saved
+  restoreScrollForChapter(ch.c);
+}
+
+/**
+ * Khôi phục vị trí scroll cho chương hiện tại.
+ * Đợi DOM render xong mới scroll.
+ */
+function restoreScrollForChapter(chapterNum) {
+  const savedProgress = loadProgress();
+  if (!savedProgress || savedProgress.chapter !== chapterNum) {
+    // No saved scroll for this chapter — scroll to top
+    window.scrollTo(0, 0);
+    return;
+  }
+  
+  const scrollY = savedProgress.scrollY || 0;
+  
+  // Scroll ngay sau khi render, nhưng có thể chưa đúng vì ảnh/font chưa load xong
+  window.scrollTo(0, scrollY);
+  
+  // Retry sau khi layout ổn định
+  let retries = 0;
+  function tryScroll() {
+    const current = window.scrollY;
+    if (Math.abs(current - scrollY) > 5 && retries < 10) {
+      window.scrollTo(0, scrollY);
+      retries++;
+      setTimeout(tryScroll, 200);
+    }
+  }
+  setTimeout(tryScroll, 100);
+  setTimeout(() => window.scrollTo(0, scrollY), 400);
 }
 
 function prevChapter() {
@@ -264,12 +366,26 @@ function applyFontSize() {
   });
 }
 
-// ===== SCROLL PROGRESS =====
+// ===== SCROLL PROGRESS & SAVE =====
 document.addEventListener('scroll', () => {
   const scrollTop = window.scrollY;
   const docHeight = document.documentElement.scrollHeight - window.innerHeight;
   const scrollPercent = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
   document.querySelector('.scroll-progress').style.width = Math.min(scrollPercent, 100) + '%';
+  
+  // Lưu tiến trình (debounced)
+  debouncedSaveProgress();
+});
+
+// ===== LƯU KHI RỜI TRANG / TẮT TRÌNH DUYỆT =====
+window.addEventListener('beforeunload', () => {
+  saveProgressNow();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    saveProgressNow();
+  }
 });
 
 // ===== KEYBOARD NAV =====
