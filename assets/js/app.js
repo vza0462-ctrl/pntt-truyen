@@ -418,8 +418,8 @@ const radio = {
   googleAudio: null,
 };
 
-// Google TTS URL (free, no key)
-const GOOGLE_TTS = 'https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=vi&q=';
+// Google TTS URL — qua proxy local de tranh CORS
+const GOOGLE_TTS = '/tts?q=';
 
 // ============================================================
 // RADIO / TEXT-TO-SPEECH — Google TTS (free, Vietnamese)

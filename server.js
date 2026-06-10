@@ -16,12 +16,28 @@ const MIME = {
 };
 
 http.createServer((req, res) => {
+  // ===== TTS Proxy: chống CORS cho Google TTS =====
+  if (req.url.startsWith('/tts?')) {
+    const params = new URL(req.url, 'http://localhost').searchParams;
+    const text = params.get('q') || '';
+    if (!text.trim()) {
+      res.writeHead(400);
+      return res.end('Missing q parameter');
+    }
+    
+    const url = 'https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=vi&q=' +
+                encodeURIComponent(text.substring(0, 200));
+    
+    httpsGet(url, res);
+    return;
+  }
+
+  // ===== Static files =====
   let url = req.url.split('?')[0];
   if (url === '/') url = '/index.html';
   
   const fp = path.join(ROOT, url);
   
-  // Security: prevent directory traversal
   if (!fp.startsWith(ROOT)) {
     res.writeHead(403);
     return res.end('Forbidden');
@@ -41,5 +57,24 @@ http.createServer((req, res) => {
     res.end(data);
   });
 }).listen(PORT, () => {
-  console.log(`✓ PNTT server running at http://localhost:${PORT}`);
+  console.log('✓ PNTT server running at http://localhost:' + PORT);
+  console.log('✓ TTS proxy ready (CORS-free)');
 });
+
+/** Fetch từ Google TTS và pipe response về client */
+function httpsGet(url, res) {
+  const https = require('https');
+  https.get(url, (proxyRes) => {
+    // Pipe headers
+    const headers = { 'Content-Type': 'audio/mpeg' };
+    res.writeHead(proxyRes.statusCode || 200, headers);
+    
+    // Pipe data
+    proxyRes.on('data', chunk => res.write(chunk));
+    proxyRes.on('end', () => res.end());
+  }).on('error', (err) => {
+    console.error('TTS proxy error:', err.message);
+    res.writeHead(500);
+    res.end('TTS proxy error');
+  });
+}
