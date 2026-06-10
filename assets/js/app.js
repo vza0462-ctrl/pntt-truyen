@@ -422,8 +422,20 @@ const radio = {
 const GOOGLE_TTS = 'https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=vi&q=';
 
 // ============================================================
-// RADIO / TEXT-TO-SPEECH — Google TTS (free, Vietnamese, no key)
+// RADIO / TEXT-TO-SPEECH — Google TTS (free, Vietnamese)
+// Fix: unlock audio on user click to bypass autoplay policy
 // ============================================================
+
+let _audioCtx = null;
+
+/** Gọi hàm này trong sự kiện click để unlock audio context */
+function unlockAudio() {
+  if (_audioCtx) return;
+  try {
+    _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    _audioCtx.resume();
+  } catch(e) { /* silently fail */ }
+}
 
 function toggleRadio() {
   const btn = $('radioBtn');
@@ -435,6 +447,9 @@ function toggleRadio() {
   const paragraphs = document.querySelectorAll('.reader-content p');
   if (!paragraphs.length) { showToast('Không có nội dung để đọc'); return; }
 
+  // Unlock audio (mobile Safari/Chrome)
+  unlockAudio();
+
   radio.active = true;
   radio.paragraphs = [];
   paragraphs.forEach(p => radio.paragraphs.push(p.textContent));
@@ -445,8 +460,8 @@ function toggleRadio() {
   player.style.display = 'block';
   $('radioInfo').textContent = '🎧 Chương ' + state.currentChapter.c + ' — đang phát...';
 
-  // Đọc paragraph đầu tiên
-  requestAnimationFrame(() => speakParagraph(0));
+  // Đọc paragraph đầu tiên (không qua requestAnimationFrame để giữ user gesture)
+  speakParagraph(0);
 }
 
 // ===== MAIN SPEAK =====
@@ -462,11 +477,11 @@ function speakParagraph(index) {
   speakWithGoogle(text, index);
 }
 
-// ===== GOOGLE TTS (free, Vietnamese, works on mobile) =====
+// ===== GOOGLE TTS =====
 function speakWithGoogle(text, paraIdx) {
   setRadioPlaying(true);
 
-  // Split into 200-char chunks (Google limit per request)
+  // Split into 200-char chunks (Google limit)
   const MAX = 200;
   const chunks = [];
   for (let i = 0; i < text.length; i += MAX) {
@@ -487,8 +502,12 @@ function playGoogleChunk(paraIdx, chunkIdx) {
   }
 
   const text = chunks[chunkIdx];
-  const url = GOOGLE_TTS + encodeURIComponent(text);
+  if (!text.trim()) {
+    playGoogleChunk(paraIdx, chunkIdx + 1);
+    return;
+  }
 
+  const url = GOOGLE_TTS + encodeURIComponent(text);
   const audio = new Audio(url);
   radio.googleAudio = audio;
 
@@ -501,23 +520,37 @@ function playGoogleChunk(paraIdx, chunkIdx) {
   };
 
   audio.onerror = () => {
-    // Nội dung bị lỗi thì skip paragraph này
-    console.warn('Google TTS error, skip');
+    console.warn('Google TTS error para', paraIdx, 'chunk', chunkIdx);
     speakParagraph(paraIdx + 1);
   };
 
-  audio.play().catch(() => {
-    speakParagraph(paraIdx + 1);
-  });
+  // Promise-based play() để bắt lỗi autoplay
+  const playPromise = audio.play();
+  if (playPromise !== undefined) {
+    playPromise.catch(err => {
+      console.warn('Audio play error:', err.message);
+      // Autoplay bị chặn — cần unlock audio context
+      unlockAudio();
+      // Thử lại 1 lần
+      setTimeout(() => {
+        const retry = new Audio(url);
+        radio.googleAudio = retry;
+        retry.onended = audio.onended;
+        retry.onerror = audio.onerror;
+        retry.play().catch(() => speakParagraph(paraIdx + 1));
+      }, 100);
+    });
+  }
 }
 
 // ===== UI HELPERS =====
 function setRadioPlaying(playing) {
-  $('radioPlayPause').textContent = playing ? '⏸' : '▶';
-  if (playing) {
-    $('radioWave').classList.add('active');
-  } else {
-    $('radioWave').classList.remove('active');
+  const btn = $('radioPlayPause');
+  if (btn) btn.textContent = playing ? '⏸' : '▶';
+  const wave = $('radioWave');
+  if (wave) {
+    if (playing) wave.classList.add('active');
+    else wave.classList.remove('active');
   }
 }
 
@@ -535,8 +568,10 @@ function toggleRadioPlayPause() {
     radio.googleAudio.pause();
     setRadioPlaying(false);
   } else if (radio.googleAudio) {
-    radio.googleAudio.play();
-    setRadioPlaying(true);
+    const playPromise = radio.googleAudio.play();
+    if (playPromise !== undefined) {
+      playPromise.then(() => setRadioPlaying(true)).catch(() => {});
+    }
   }
 }
 
@@ -546,19 +581,20 @@ function stopRadio() {
 
   const btn = $('radioBtn');
   const player = $('radioPlayer');
-  btn.textContent = '🎧';
-  btn.classList.remove('active');
-  player.style.display = 'none';
-  $('radioWave').classList.remove('active');
+  if (btn) { btn.textContent = '🎧'; btn.classList.remove('active'); }
+  if (player) player.style.display = 'none';
+  setRadioPlaying(false);
   document.querySelectorAll('.reader-content p.speaking').forEach(p => p.classList.remove('speaking'));
 }
 
 function finishRadioChapter() {
   if (!radio.active) return;
   document.querySelectorAll('.reader-content p.speaking').forEach(p => p.classList.remove('speaking'));
-  $('radioWave').classList.remove('active');
-  $('radioPlayPause').textContent = '✓';
-  $('radioInfo').textContent = 'Đã phát xong chương này';
+  setRadioPlaying(false);
+  const info = $('radioInfo');
+  if (info) info.textContent = '✅ Đã phát xong chương này';
+  const btn = $('radioPlayPause');
+  if (btn) btn.textContent = '✓';
 
   setTimeout(() => {
     const total = state.index[state.index.length - 1].e;
@@ -576,7 +612,6 @@ function finishRadioChapter() {
 
 function changeRadioSpeed(sel) {
   radio.speed = parseFloat(sel.value);
-  // Google TTS doesn't support speed change mid-stream
 }
 
 // Stop radio when changing chapters
