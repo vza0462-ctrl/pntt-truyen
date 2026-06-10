@@ -1,8 +1,10 @@
+// PNTT Server — chạy local + Vercel serverless
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const urlMod = require('url');
 
-const PORT = 3000;
 const ROOT = __dirname;
 
 const MIME = {
@@ -15,66 +17,77 @@ const MIME = {
   '.jpg': 'image/jpeg',
 };
 
-http.createServer((req, res) => {
-  // ===== TTS Proxy: chống CORS cho Google TTS =====
-  if (req.url.startsWith('/tts?')) {
-    const params = new URL(req.url, 'http://localhost').searchParams;
-    const text = params.get('q') || '';
-    if (!text.trim()) {
+function handler(req, res) {
+  const parsed = urlMod.parse(req.url, true);
+  const pathname = parsed.pathname || '/';
+  
+  // ===== TTS Proxy =====
+  if (pathname === '/tts') {
+    const text = (parsed.query.q || '').trim();
+    if (!text) {
       res.writeHead(400);
       return res.end('Missing q parameter');
     }
     
-    const url = 'https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=vi&q=' +
-                encodeURIComponent(text.substring(0, 200));
+    const ttsUrl = 'https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=vi&q=' +
+                   encodeURIComponent(text.substring(0, 200));
     
-    httpsGet(url, res);
+    https.get(ttsUrl, (proxyRes) => {
+      // Trả về audio/mpeg
+      const statusCode = proxyRes.statusCode === 200 ? 200 : 502;
+      const isRedirect = proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location;
+      
+      if (isRedirect) {
+        // Follow redirect
+        https.get(proxyRes.headers.location, (r2) => {
+          res.writeHead(r2.statusCode, { 'Content-Type': 'audio/mpeg' });
+          r2.pipe(res);
+        }).on('error', () => {
+          res.writeHead(502);
+          res.end('TTS proxy error');
+        });
+        return;
+      }
+      
+      res.writeHead(statusCode, { 'Content-Type': 'audio/mpeg' });
+      proxyRes.pipe(res);
+    }).on('error', (err) => {
+      res.writeHead(502);
+      res.end('TTS proxy error: ' + err.message);
+    });
     return;
   }
 
   // ===== Static files =====
-  let url = req.url.split('?')[0];
-  if (url === '/') url = '/index.html';
+  let filePath = pathname === '/' ? '/index.html' : pathname;
   
-  const fp = path.join(ROOT, url);
-  
-  if (!fp.startsWith(ROOT)) {
+  // Security: prevent directory traversal
+  const fullPath = path.join(ROOT, filePath);
+  if (!fullPath.startsWith(ROOT)) {
     res.writeHead(403);
     return res.end('Forbidden');
   }
   
-  fs.readFile(fp, (err, data) => {
+  fs.readFile(fullPath, (err, data) => {
     if (err) {
       res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end('<h1>404 - File not found</h1>');
     }
     
-    const ext = path.extname(fp);
-    res.writeHead(200, {
-      'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Access-Control-Allow-Origin': '*',
-    });
+    const ext = path.extname(fullPath);
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
     res.end(data);
   });
-}).listen(PORT, () => {
-  console.log('✓ PNTT server running at http://localhost:' + PORT);
-  console.log('✓ TTS proxy ready (CORS-free)');
-});
+}
 
-/** Fetch từ Google TTS và pipe response về client */
-function httpsGet(url, res) {
-  const https = require('https');
-  https.get(url, (proxyRes) => {
-    // Pipe headers
-    const headers = { 'Content-Type': 'audio/mpeg' };
-    res.writeHead(proxyRes.statusCode || 200, headers);
-    
-    // Pipe data
-    proxyRes.on('data', chunk => res.write(chunk));
-    proxyRes.on('end', () => res.end());
-  }).on('error', (err) => {
-    console.error('TTS proxy error:', err.message);
-    res.writeHead(500);
-    res.end('TTS proxy error');
+// ===== Export for Vercel =====
+module.exports = handler;
+
+// ===== Local standalone server =====
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  http.createServer(handler).listen(PORT, () => {
+    console.log('✓ PNTT server at http://localhost:' + PORT);
+    console.log('✓ TTS proxy ready');
   });
 }
