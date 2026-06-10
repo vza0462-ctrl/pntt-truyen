@@ -95,6 +95,7 @@
         <div class="toolbar-right">
           <input type="number" id="jumpInput" class="jump-input" placeholder="#" onkeydown="if(event.key==='Enter')jumpToChapter()">
           <button class="btn btn-sm" onclick="jumpToChapter()">🔍</button>
+          <button class="btn btn-sm radio-toggle" id="radioBtn" onclick="toggleRadio()" title="Nghe đọc (Radio)">🎧</button>
         </div>
       </div>
     </div>
@@ -114,6 +115,29 @@
 
     <!-- Scroll progress -->
     <div id="scrollProgress" class="scroll-progress"></div>
+
+    <!-- Radio Player -->
+    <div id="radioPlayer" class="radio-player" style="display:none">
+      <div class="radio-player-inner">
+        <div class="radio-controls">
+          <button class="radio-btn" id="radioPlayPause" onclick="toggleRadioPlayPause()" title="Play / Pause">▶</button>
+          <button class="radio-btn" onclick="stopRadio()" title="Dừng">⏹</button>
+          <span class="radio-info" id="radioInfo">🎧 Đang phát...</span>
+        </div>
+        <div class="radio-speed">
+          <label>Tốc độ:</label>
+          <select id="radioSpeed" onchange="changeRadioSpeed(this)">
+            <option value="0.75">0.75x</option>
+            <option value="1" selected>1x</option>
+            <option value="1.25">1.25x</option>
+            <option value="1.5">1.5x</option>
+            <option value="2">2x</option>
+          </select>
+        </div>
+        <button class="radio-close" onclick="stopRadio()" title="Đóng">✕</button>
+      </div>
+      <div class="radio-wave" id="radioWave"><span></span><span></span><span></span><span></span></div>
+    </div>
   </div>
 </main>
 

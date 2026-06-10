@@ -404,5 +404,202 @@ function showToast(msg) {
   setTimeout(() => toast.remove(), 4000);
 }
 
+// ========== RADIO / TEXT-TO-SPEECH ==========
+const radio = {
+  active: false,
+  paragraphs: [],
+  currentIndex: 0,
+  utterance: null,
+  voice: null,
+  speed: 1,
+};
+
+function toggleRadio() {
+  const btn = $('radioBtn');
+  const player = $('radioPlayer');
+
+  if (radio.active) {
+    stopRadio();
+    return;
+  }
+
+  if (!state.currentChapter) {
+    showToast('Vui lòng mở một chương trước');
+    return;
+  }
+
+  // Get all paragraphs from current content
+  const paragraphs = document.querySelectorAll('.reader-content p');
+  if (!paragraphs.length) {
+    showToast('Không có nội dung để đọc');
+    return;
+  }
+
+  radio.active = true;
+  radio.paragraphs = [];
+  paragraphs.forEach(p => radio.paragraphs.push(p.textContent));
+  radio.currentIndex = 0;
+  
+  // Tìm giọng Adam (VI-VN)
+  findVietnameseVoice();
+
+  btn.textContent = '🔊';
+  btn.classList.add('active');
+  player.style.display = 'block';
+  $('radioInfo').textContent = `🎧 Chương ${state.currentChapter.c} — đang phát...`;
+
+  speakParagraph(0);
+}
+
+function findVietnameseVoice() {
+  const voices = window.speechSynthesis.getVoices();
+  // Ưu tiên: Adam > bất kỳ giọng vi-VN nam nào > giọng vi-VN đầu tiên
+  let adam = null;
+  let anyMale = null;
+  let anyVi = null;
+
+  for (const v of voices) {
+    if (!v.lang.startsWith('vi')) continue;
+    if (!anyVi) anyVi = v;
+    const name = v.name.toLowerCase();
+    if (name.includes('adam')) adam = v;
+    else if (!anyMale && (name.includes('male') || name.includes('nam'))) anyMale = v;
+  }
+
+  radio.voice = adam || anyMale || anyVi || null;
+}
+
+function speakParagraph(index) {
+  if (!radio.active) return;
+  if (index >= radio.paragraphs.length) {
+    // Hết chương
+    finishRadioChapter();
+    return;
+  }
+
+  radio.currentIndex = index;
+  const text = radio.paragraphs[index];
+  if (!text || !text.trim()) {
+    speakParagraph(index + 1);
+    return;
+  }
+
+  // Highlight paragraph
+  highlightParagraph(index);
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'vi-VN';
+  utterance.rate = radio.speed;
+  if (radio.voice) utterance.voice = radio.voice;
+
+  utterance.onstart = () => {
+    radio.utterance = utterance;
+    $('radioPlayPause').textContent = '⏸';
+    // Animate wave
+    $('radioWave').classList.add('active');
+  };
+
+  utterance.onend = () => {
+    speakParagraph(index + 1);
+  };
+
+  utterance.onerror = () => {
+    console.error('Speech error, skipping paragraph', index);
+    speakParagraph(index + 1);
+  };
+
+  window.speechSynthesis.speak(utterance);
+}
+
+function highlightParagraph(index) {
+  // Remove all highlights
+  document.querySelectorAll('.reader-content p.speaking').forEach(p => p.classList.remove('speaking'));
+
+  const allParagraphs = document.querySelectorAll('.reader-content p');
+  if (allParagraphs[index]) {
+    allParagraphs[index].classList.add('speaking');
+    // Scroll into view smoothly
+    allParagraphs[index].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+}
+
+function toggleRadioPlayPause() {
+  if (window.speechSynthesis.paused) {
+    window.speechSynthesis.resume();
+    $('radioPlayPause').textContent = '⏸';
+    $('radioWave').classList.add('active');
+  } else if (window.speechSynthesis.speaking) {
+    window.speechSynthesis.pause();
+    $('radioPlayPause').textContent = '▶';
+    $('radioWave').classList.remove('active');
+  }
+}
+
+function stopRadio() {
+  radio.active = false;
+  window.speechSynthesis.cancel();
+  radio.utterance = null;
+
+  const btn = $('radioBtn');
+  const player = $('radioPlayer');
+  btn.textContent = '🎧';
+  btn.classList.remove('active');
+  player.style.display = 'none';
+  $('radioWave').classList.remove('active');
+
+  // Remove highlights
+  document.querySelectorAll('.reader-content p.speaking').forEach(p => p.classList.remove('speaking'));
+}
+
+function finishRadioChapter() {
+  if (!radio.active) return;
+  
+  // Remove highlights
+  document.querySelectorAll('.reader-content p.speaking').forEach(p => p.classList.remove('speaking'));
+  $('radioWave').classList.remove('active');
+  $('radioPlayPause').textContent = '✓';
+  $('radioInfo').textContent = '✅ Đã phát xong chương này';
+
+  // Tự động sang chương sau
+  setTimeout(() => {
+    const total = state.index[state.index.length - 1].e;
+    if (state.currentChapter && state.currentChapter.c < total) {
+      nextChapter();
+      // Auto-start radio on next chapter
+      setTimeout(() => {
+        if (!radio.active) {
+          toggleRadio();
+        }
+      }, 1000);
+    } else {
+      showToast('🎉 Đã đọc xong toàn bộ truyện!');
+      radio.active = false;
+      $('radioBtn').textContent = '🎧';
+      $('radioBtn').classList.remove('active');
+    }
+  }, 1500);
+}
+
+function changeRadioSpeed(sel) {
+  radio.speed = parseFloat(sel.value);
+  // Nếu đang phát, restart paragraph hiện tại với tốc độ mới
+  if (radio.active && window.speechSynthesis.speaking) {
+    const currentIdx = radio.currentIndex;
+    window.speechSynthesis.cancel();
+    setTimeout(() => speakParagraph(currentIdx), 100);
+  }
+}
+
+// Dừng radio nếu chuyển chương bằng tay
+const _origGoToChapter = goToChapter;
+goToChapter = function(num) {
+  if (radio.active) stopRadio();
+  _origGoToChapter(num);
+};
+
+// Pre-load voices list
+window.speechSynthesis.getVoices();
+window.speechSynthesis.onvoiceschanged = () => { window.speechSynthesis.getVoices(); };
+
 // ===== START =====
 document.addEventListener('DOMContentLoaded', init);
