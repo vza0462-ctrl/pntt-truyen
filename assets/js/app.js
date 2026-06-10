@@ -440,8 +440,9 @@ function toggleRadio() {
   paragraphs.forEach(p => radio.paragraphs.push(p.textContent));
   radio.currentIndex = 0;
   
-  // Tìm giọng Adam (VI-VN)
-  findVietnameseVoice();
+  // Populate voice list and select best Vietnamese voice
+  populateVoiceList();
+  selectBestVietnameseVoice();
 
   btn.textContent = '🔊';
   btn.classList.add('active');
@@ -451,22 +452,82 @@ function toggleRadio() {
   speakParagraph(0);
 }
 
-function findVietnameseVoice() {
+function populateVoiceList() {
+  const sel = $('radioVoice');
   const voices = window.speechSynthesis.getVoices();
-  // Ưu tiên: Adam > bất kỳ giọng vi-VN nam nào > giọng vi-VN đầu tiên
-  let adam = null;
-  let anyMale = null;
-  let anyVi = null;
+  const vietVoices = voices.filter(v => v.lang && v.lang.startsWith('vi'));
 
-  for (const v of voices) {
-    if (!v.lang.startsWith('vi')) continue;
-    if (!anyVi) anyVi = v;
-    const name = v.name.toLowerCase();
-    if (name.includes('adam')) adam = v;
-    else if (!anyMale && (name.includes('male') || name.includes('nam'))) anyMale = v;
+  sel.innerHTML = '';
+
+  if (vietVoices.length === 0) {
+    // Fallback: show all voices
+    const allVoices = voices.filter(v => v.lang && v.lang.startsWith('en'));
+    if (allVoices.length) {
+      allVoices.forEach((v, i) => {
+        const opt = document.createElement('option');
+        opt.value = 'all-' + i;
+        opt.textContent = `${v.name} (${v.lang}) [English fallback]`;
+        sel.appendChild(opt);
+      });
+    } else {
+      sel.innerHTML = '<option value="">Không có giọng Việt - cài tiếng Việt trong Windows</option>';
+    }
+    return;
   }
 
-  radio.voice = adam || anyMale || anyVi || null;
+  vietVoices.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v.name;
+    const isAdam = v.name.toLowerCase().includes('adam');
+    opt.textContent = `${v.name} (${v.lang})${isAdam ? ' ★' : ''}`;
+    if (isAdam) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+function selectBestVietnameseVoice() {
+  const sel = $('radioVoice');
+  const voices = window.speechSynthesis.getVoices();
+  
+  // Find selected voice
+  const selectedName = sel.value;
+  if (!selectedName) {
+    // Auto-select: try Adam first, then any vi voice
+    const vietVoices = voices.filter(v => v.lang && v.lang.startsWith('vi'));
+    let found = vietVoices.find(v => v.name.toLowerCase().includes('adam'));
+    if (!found) found = vietVoices[0];
+    radio.voice = found || null;
+    return;
+  }
+
+  // Check if it's an all-* fallback
+  if (selectedName.startsWith('all-')) {
+    const idx = parseInt(selectedName.replace('all-', ''));
+    const allVoices = window.speechSynthesis.getVoices();
+    radio.voice = allVoices[idx] || null;
+    return;
+  }
+
+  radio.voice = voices.find(v => v.name === selectedName) || null;
+}
+
+function changeRadioVoice(sel) {
+  const voices = window.speechSynthesis.getVoices();
+  const val = sel.value;
+  
+  if (val.startsWith('all-')) {
+    const idx = parseInt(val.replace('all-', ''));
+    radio.voice = voices[idx] || null;
+  } else {
+    radio.voice = voices.find(v => v.name === val) || null;
+  }
+
+  // Restart current paragraph with new voice
+  if (radio.active && window.speechSynthesis.speaking) {
+    const currentIdx = radio.currentIndex;
+    window.speechSynthesis.cancel();
+    setTimeout(() => speakParagraph(currentIdx), 100);
+  }
 }
 
 function speakParagraph(index) {

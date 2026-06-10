@@ -125,6 +125,12 @@
           <span class="radio-info" id="radioInfo">🎧 Đang phát...</span>
         </div>
         <div class="radio-speed">
+          <label>Giọng:</label>
+          <select id="radioVoice" class="radio-voice-select" onchange="changeRadioVoice(this)">
+            <option value="">Đang tải...</option>
+          </select>
+        </div>
+        <div class="radio-speed">
           <label>Tốc độ:</label>
           <select id="radioSpeed" onchange="changeRadioSpeed(this)">
             <option value="0.75">0.75x</option>

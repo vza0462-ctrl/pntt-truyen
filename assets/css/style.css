@@ -460,6 +460,16 @@ img { max-width: 100%; }
   color: #e0d8c8;
 }
 
+.radio-voice-select {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.radio-voice-select option {
+  font-size: 13px;
+  padding: 4px;
+}
+
 .radio-close {
   background: transparent;
   border: none;
