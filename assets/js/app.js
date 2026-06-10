@@ -412,7 +412,7 @@ const radio = {
   utterance: null,
   voice: null,
   speed: 1,
-  mode: 'browser', // 'browser' | 'google'
+  mode: localStorage.getItem('pntt_radioMode') || 'google',
   googleChunks: [],
   googleChunkIdx: 0,
   googleAudio: null,
@@ -421,22 +421,17 @@ const radio = {
 // Google TTS URL — qua proxy local de tranh CORS
 const GOOGLE_TTS = '/tts?q=';
 
-// ============================================================
-// RADIO / TEXT-TO-SPEECH — Google TTS (free, Vietnamese)
-// Fix: unlock audio on user click to bypass autoplay policy
-// ============================================================
-
 let _audioCtx = null;
 
-/** Gọi hàm này trong sự kiện click để unlock audio context */
 function unlockAudio() {
   if (_audioCtx) return;
   try {
     _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     _audioCtx.resume();
-  } catch(e) { /* silently fail */ }
+  } catch(e) {}
 }
 
+// ===== TOGGLE RADIO =====
 function toggleRadio() {
   const btn = $('radioBtn');
   const player = $('radioPlayer');
@@ -447,7 +442,6 @@ function toggleRadio() {
   const paragraphs = document.querySelectorAll('.reader-content p');
   if (!paragraphs.length) { showToast('Không có nội dung để đọc'); return; }
 
-  // Unlock audio (mobile Safari/Chrome)
   unlockAudio();
 
   radio.active = true;
@@ -455,13 +449,81 @@ function toggleRadio() {
   paragraphs.forEach(p => radio.paragraphs.push(p.textContent));
   radio.currentIndex = 0;
 
-  btn.textContent = '🔊';
+  // Đồng bộ mode từ localStorage
+  const savedMode = localStorage.getItem('pntt_radioMode');
+  if (savedMode) radio.mode = savedMode;
+  const modeSel = $('radioMode');
+  if (modeSel) modeSel.value = radio.mode;
+
+  btn.textContent = '\uD83D\uDD0A';
   btn.classList.add('active');
   player.style.display = 'block';
-  $('radioInfo').textContent = '🎧 Chương ' + state.currentChapter.c + ' — đang phát...';
+  $('radioInfo').textContent = '\uD83C\uDFA7 Chuong ' + state.currentChapter.c + ' \u2014 dang phat...';
 
-  // Đọc paragraph đầu tiên (không qua requestAnimationFrame để giữ user gesture)
+  // Nếu chọn Browser mode, tìm giọng Nam ngay
+  if (radio.mode === 'browser') {
+    findMaleVoice();
+  }
+
   speakParagraph(0);
+}
+
+// ===== CHỌN GIỌNG =====
+function changeRadioMode(sel) {
+  radio.mode = sel.value;
+  localStorage.setItem('pntt_radioMode', radio.mode);
+  if (radio.mode === 'browser') findMaleVoice();
+  // Nếu đang phát, chuyển ngay sang mode mới
+  if (radio.active) {
+    const ci = radio.currentIndex;
+    stopRadioInternal();
+    radio.active = true;
+    // Re-show UI
+    const btn = $('radioBtn');
+    const player = $('radioPlayer');
+    btn.textContent = '\uD83D\uDD0A';
+    btn.classList.add('active');
+    player.style.display = 'block';
+    $('radioInfo').textContent = '\uD83C\uDFA7 Chuong ' + state.currentChapter.c + ' \u2014 dang phat...';
+    setTimeout(() => speakParagraph(ci), 300);
+  }
+}
+
+// ===== TÌM GIỌNG VIỆT NAM (ưu tiên giọng Nam) =====
+let _voicesLoaded = false;
+
+function waitForVoices(callback, retries) {
+  if (retries <= 0) { callback([]); return; }
+  const v = window.speechSynthesis.getVoices();
+  if (v.length > 0 && _voicesLoaded) { callback(v); return; }
+  if (v.length > 0) _voicesLoaded = true;
+  window.speechSynthesis.onvoiceschanged = () => {
+    const vv = window.speechSynthesis.getVoices();
+    _voicesLoaded = true;
+    callback(vv);
+  };
+  // Fallback: call again after timeout
+  if (v.length > 0) { callback(v); return; }
+  setTimeout(() => waitForVoices(callback, retries - 1), 500);
+}
+
+function findMaleVoice() {
+  waitForVoices(function(voices) {
+    // Ưu tiên giọng Nam tiếng Việt
+    const vietVoices = voices.filter(v => v.lang && v.lang.startsWith('vi'));
+    let found = null;
+    
+    if (vietVoices.length > 0) {
+      // Tìm giọng "Nam" trước
+      found = vietVoices.find(v => v.name.toLowerCase().includes('nam'));
+      // Nếu không có Nam, lấy bất kỳ giọng Việt nào khác Adam
+      if (!found) found = vietVoices.find(v => !v.name.toLowerCase().includes('adam'));
+      // Cuối cùng, lấy giọng Việt đầu tiên
+      if (!found) found = vietVoices[0];
+    }
+
+    radio.voice = found || null;
+  }, 10);
 }
 
 // ===== MAIN SPEAK =====
@@ -474,14 +536,62 @@ function speakParagraph(index) {
   if (!text || !text.trim()) { speakParagraph(index + 1); return; }
 
   highlightParagraph(index);
-  speakWithGoogle(text, index);
+
+  if (radio.mode === 'browser') {
+    speakWithBrowser(text, index);
+  } else {
+    speakWithGoogle(text, index);
+  }
+}
+
+// ===== BROWSER TTS (Web Speech API — giọng Nam online) =====
+function speakWithBrowser(text, index) {
+  setRadioPlaying(true);
+
+  // Nếu chưa có voice thì tìm lại
+  if (!radio.voice) {
+    findMaleVoice();
+  }
+
+  // Chia nhỏ text nếu quá dài (300 ký tự cho SpeechSynthesis)
+  const MAX = 300;
+  const parts = [];
+  for (let i = 0; i < text.length; i += MAX) {
+    parts.push(text.substring(i, i + MAX));
+  }
+
+  let partIdx = 0;
+  function speakPart() {
+    if (!radio.active) return;
+    if (partIdx >= parts.length) {
+      speakParagraph(index + 1);
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(parts[partIdx]);
+    utterance.lang = 'vi-VN';
+    utterance.rate = radio.speed;
+    if (radio.voice) utterance.voice = radio.voice;
+
+    utterance.onend = () => {
+      partIdx++;
+      speakPart();
+    };
+    utterance.onerror = () => {
+      partIdx++;
+      speakPart();
+    };
+
+    window.speechSynthesis.speak(utterance);
+  }
+
+  speakPart();
 }
 
 // ===== GOOGLE TTS =====
 function speakWithGoogle(text, paraIdx) {
   setRadioPlaying(true);
 
-  // Split into 200-char chunks (Google limit)
   const MAX = 200;
   const chunks = [];
   for (let i = 0; i < text.length; i += MAX) {
@@ -520,18 +630,14 @@ function playGoogleChunk(paraIdx, chunkIdx) {
   };
 
   audio.onerror = () => {
-    console.warn('Google TTS error para', paraIdx, 'chunk', chunkIdx);
+    console.warn('Google TTS error');
     speakParagraph(paraIdx + 1);
   };
 
-  // Promise-based play() để bắt lỗi autoplay
   const playPromise = audio.play();
   if (playPromise !== undefined) {
-    playPromise.catch(err => {
-      console.warn('Audio play error:', err.message);
-      // Autoplay bị chặn — cần unlock audio context
+    playPromise.catch(() => {
       unlockAudio();
-      // Thử lại 1 lần
       setTimeout(() => {
         const retry = new Audio(url);
         radio.googleAudio = retry;
@@ -546,7 +652,7 @@ function playGoogleChunk(paraIdx, chunkIdx) {
 // ===== UI HELPERS =====
 function setRadioPlaying(playing) {
   const btn = $('radioPlayPause');
-  if (btn) btn.textContent = playing ? '⏸' : '▶';
+  if (btn) btn.textContent = playing ? '\u23F8' : '\u25B6';
   const wave = $('radioWave');
   if (wave) {
     if (playing) wave.classList.add('active');
@@ -564,37 +670,49 @@ function highlightParagraph(index) {
 }
 
 function toggleRadioPlayPause() {
-  if (radio.googleAudio && !radio.googleAudio.paused) {
-    radio.googleAudio.pause();
-    setRadioPlaying(false);
-  } else if (radio.googleAudio) {
-    const playPromise = radio.googleAudio.play();
-    if (playPromise !== undefined) {
-      playPromise.then(() => setRadioPlaying(true)).catch(() => {});
+  if (radio.mode === 'google') {
+    if (radio.googleAudio && !radio.googleAudio.paused) {
+      radio.googleAudio.pause();
+      setRadioPlaying(false);
+    } else if (radio.googleAudio) {
+      const pp = radio.googleAudio.play();
+      if (pp) pp.then(() => setRadioPlaying(true)).catch(() => {});
+    }
+  } else {
+    // Browser mode
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+      setRadioPlaying(true);
+    } else if (window.speechSynthesis.speaking) {
+      window.speechSynthesis.pause();
+      setRadioPlaying(false);
     }
   }
 }
 
-function stopRadio() {
+function stopRadioInternal() {
   radio.active = false;
+  window.speechSynthesis.cancel();
   if (radio.googleAudio) { radio.googleAudio.pause(); radio.googleAudio = null; }
-
-  const btn = $('radioBtn');
-  const player = $('radioPlayer');
-  if (btn) { btn.textContent = '🎧'; btn.classList.remove('active'); }
-  if (player) player.style.display = 'none';
   setRadioPlaying(false);
   document.querySelectorAll('.reader-content p.speaking').forEach(p => p.classList.remove('speaking'));
+}
+
+function stopRadio() {
+  stopRadioInternal();
+  const btn = $('radioBtn');
+  const player = $('radioPlayer');
+  if (btn) { btn.textContent = '\uD83C\uDFA7'; btn.classList.remove('active'); }
+  if (player) player.style.display = 'none';
 }
 
 function finishRadioChapter() {
   if (!radio.active) return;
   document.querySelectorAll('.reader-content p.speaking').forEach(p => p.classList.remove('speaking'));
-  setRadioPlaying(false);
   const info = $('radioInfo');
-  if (info) info.textContent = '✅ Đã phát xong chương này';
+  if (info) info.textContent = '\u2705 Da phat xong chuong nay';
   const btn = $('radioPlayPause');
-  if (btn) btn.textContent = '✓';
+  if (btn) btn.textContent = '\u2713';
 
   setTimeout(() => {
     const total = state.index[state.index.length - 1].e;
@@ -602,9 +720,9 @@ function finishRadioChapter() {
       nextChapter();
       setTimeout(() => { if (!radio.active) toggleRadio(); }, 1000);
     } else {
-      showToast('🎉 Đã đọc xong toàn bộ truyện!');
+      showToast('Da doc xong toan bo truyen!');
       radio.active = false;
-      $('radioBtn').textContent = '🎧';
+      $('radioBtn').textContent = '\uD83C\uDFA7';
       $('radioBtn').classList.remove('active');
     }
   }, 1500);

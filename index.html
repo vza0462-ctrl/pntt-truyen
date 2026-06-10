@@ -125,6 +125,13 @@
           <span class="radio-info" id="radioInfo">🎧 Google TTS...</span>
         </div>
         <div class="radio-speed">
+          <label>Giọng:</label>
+          <select id="radioMode" onchange="changeRadioMode(this)" class="radio-mode-select">
+            <option value="google">Google TTS (Nữ)</option>
+            <option value="browser">Trình duyệt (Nam)</option>
+          </select>
+        </div>
+        <div class="radio-speed">
           <label>Tốc độ:</label>
           <select id="radioSpeed" onchange="changeRadioSpeed(this)">
             <option value="0.75">0.75x</option>
