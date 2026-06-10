@@ -588,9 +588,22 @@ function speakWithBrowser(text, index) {
   speakPart();
 }
 
-// ===== GOOGLE TTS =====
+// ===== GOOGLE TTS (auto-fallback to browser if fails) =====
+let _googleFailCount = 0;
+
 function speakWithGoogle(text, paraIdx) {
   setRadioPlaying(true);
+
+  // Nếu fail > 3 lần, tự động chuyển sang Browser mode
+  if (_googleFailCount >= 3) {
+    $('radioInfo').textContent = 'Google TTS loi, chuyen sang giong trinh duyet...';
+    radio.mode = 'browser';
+    findMaleVoice();
+    const modeSel = $('radioMode');
+    if (modeSel) modeSel.value = 'browser';
+    setTimeout(() => speakWithBrowser(text, paraIdx), 300);
+    return;
+  }
 
   const MAX = 200;
   const chunks = [];
@@ -622,6 +635,8 @@ function playGoogleChunk(paraIdx, chunkIdx) {
   radio.googleAudio = audio;
 
   audio.onended = () => {
+    // Reset fail count khi phát thành công
+    _googleFailCount = 0;
     if (radio.active && chunkIdx + 1 < chunks.length) {
       playGoogleChunk(paraIdx, chunkIdx + 1);
     } else if (radio.active) {
@@ -630,20 +645,27 @@ function playGoogleChunk(paraIdx, chunkIdx) {
   };
 
   audio.onerror = () => {
-    console.warn('Google TTS error');
-    speakParagraph(paraIdx + 1);
+    _googleFailCount++;
+    speakWithGoogle(radio.paragraphs[paraIdx], paraIdx);
   };
 
   const playPromise = audio.play();
   if (playPromise !== undefined) {
     playPromise.catch(() => {
+      _googleFailCount++;
       unlockAudio();
       setTimeout(() => {
         const retry = new Audio(url);
         radio.googleAudio = retry;
         retry.onended = audio.onended;
-        retry.onerror = audio.onerror;
-        retry.play().catch(() => speakParagraph(paraIdx + 1));
+        retry.onerror = () => {
+          _googleFailCount++;
+          speakWithGoogle(radio.paragraphs[paraIdx], paraIdx);
+        };
+        retry.play().catch(() => {
+          _googleFailCount++;
+          speakWithGoogle(radio.paragraphs[paraIdx], paraIdx);
+        });
       }, 100);
     });
   }
