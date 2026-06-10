@@ -465,9 +465,23 @@ img { max-width: 100%; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.radio-voice-select option {
+.radio-voice-select option,
+.radio-mode-select option {
   font-size: 13px;
   padding: 4px;
+}
+.radio-mode-select {
+  background: rgba(255,255,255,0.08);
+  color: var(--nav-text);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.radio-mode-select option {
+  background: #1a1a2e;
+  color: #e0d8c8;
 }
 
 .radio-close {

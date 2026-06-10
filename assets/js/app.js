@@ -412,65 +412,71 @@ const radio = {
   utterance: null,
   voice: null,
   speed: 1,
+  mode: 'browser', // 'browser' | 'google'
+  googleChunks: [],
+  googleChunkIdx: 0,
+  googleAudio: null,
 };
+
+// Google TTS URL (free, no key)
+const GOOGLE_TTS = 'https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=vi&q=';
+
+// ============================================================
+// RADIO / TEXT-TO-SPEECH
+// Supports: Browser TTS (Web Speech API) + Google TTS (free, no key)
+// ============================================================
 
 function toggleRadio() {
   const btn = $('radioBtn');
   const player = $('radioPlayer');
 
-  if (radio.active) {
-    stopRadio();
-    return;
-  }
+  if (radio.active) { stopRadio(); return; }
+  if (!state.currentChapter) { showToast('Vui long mo mot chuong truoc'); return; }
 
-  if (!state.currentChapter) {
-    showToast('Vui lòng mở một chương trước');
-    return;
-  }
-
-  // Get all paragraphs from current content
   const paragraphs = document.querySelectorAll('.reader-content p');
-  if (!paragraphs.length) {
-    showToast('Không có nội dung để đọc');
-    return;
-  }
+  if (!paragraphs.length) { showToast('Khong co noi dung de doc'); return; }
 
   radio.active = true;
   radio.paragraphs = [];
   paragraphs.forEach(p => radio.paragraphs.push(p.textContent));
   radio.currentIndex = 0;
-  
-  // Populate voice list and select best Vietnamese voice
+  radio.mode = localStorage.getItem('pntt_radioMode') || 'browser';
+
+  // Luu mode hien tai vao UI
+  const modeSel = $('radioMode');
+  if (modeSel) modeSel.value = radio.mode;
+
   populateVoiceList();
   selectBestVietnameseVoice();
 
-  btn.textContent = '🔊';
+  btn.textContent = '\uD83D\uDD0A';
   btn.classList.add('active');
   player.style.display = 'block';
-  $('radioInfo').textContent = `🎧 Chương ${state.currentChapter.c} — đang phát...`;
+  $('radioInfo').textContent = '\uD83C\uDFA7 Chuong ' + state.currentChapter.c + ' \u2014 dang phat...';
 
-  speakParagraph(0);
+  requestAnimationFrame(() => speakParagraph(0));
 }
 
+// --- Voice list (for browser mode) ---
 function populateVoiceList() {
   const sel = $('radioVoice');
+  if (!sel) return;
   const voices = window.speechSynthesis.getVoices();
   const vietVoices = voices.filter(v => v.lang && v.lang.startsWith('vi'));
 
   sel.innerHTML = '';
 
   if (vietVoices.length === 0) {
-    // Fallback: show all voices
     const allVoices = voices.filter(v => v.lang && v.lang.startsWith('en'));
     if (allVoices.length) {
       allVoices.forEach((v, i) => {
         const opt = document.createElement('option');
         opt.value = 'all-' + i;
-        opt.textContent = `${v.name} (${v.lang}) [English fallback]`;
+        opt.textContent = v.name + ' (' + v.lang + ') [English fallback]';
         sel.appendChild(opt);
       });
     } else {
-      sel.innerHTML = '<option value="">Không có giọng Việt - cài tiếng Việt trong Windows</option>';
+      sel.innerHTML = '<option value="">Khong co giong - chon Google TTS</option>';
     }
     return;
   }
@@ -479,7 +485,7 @@ function populateVoiceList() {
     const opt = document.createElement('option');
     opt.value = v.name;
     const isAdam = v.name.toLowerCase().includes('adam');
-    opt.textContent = `${v.name} (${v.lang})${isAdam ? ' ★' : ''}`;
+    opt.textContent = v.name + (isAdam ? ' \u2605' : '');
     if (isAdam) opt.selected = true;
     sel.appendChild(opt);
   });
@@ -487,12 +493,11 @@ function populateVoiceList() {
 
 function selectBestVietnameseVoice() {
   const sel = $('radioVoice');
+  if (!sel) return;
   const voices = window.speechSynthesis.getVoices();
-  
-  // Find selected voice
   const selectedName = sel.value;
-  if (!selectedName) {
-    // Auto-select: try Adam first, then any vi voice
+
+  if (!selectedName || selectedName.startsWith('all-')) {
     const vietVoices = voices.filter(v => v.lang && v.lang.startsWith('vi'));
     let found = vietVoices.find(v => v.name.toLowerCase().includes('adam'));
     if (!found) found = vietVoices[0];
@@ -500,54 +505,51 @@ function selectBestVietnameseVoice() {
     return;
   }
 
-  // Check if it's an all-* fallback
   if (selectedName.startsWith('all-')) {
     const idx = parseInt(selectedName.replace('all-', ''));
-    const allVoices = window.speechSynthesis.getVoices();
-    radio.voice = allVoices[idx] || null;
-    return;
+    radio.voice = voices[idx] || null;
+  } else {
+    radio.voice = voices.find(v => v.name === selectedName) || null;
   }
-
-  radio.voice = voices.find(v => v.name === selectedName) || null;
 }
 
 function changeRadioVoice(sel) {
-  const voices = window.speechSynthesis.getVoices();
-  const val = sel.value;
-  
-  if (val.startsWith('all-')) {
-    const idx = parseInt(val.replace('all-', ''));
-    radio.voice = voices[idx] || null;
-  } else {
-    radio.voice = voices.find(v => v.name === val) || null;
-  }
-
-  // Restart current paragraph with new voice
+  selectBestVietnameseVoice();
   if (radio.active && window.speechSynthesis.speaking) {
-    const currentIdx = radio.currentIndex;
+    const ci = radio.currentIndex;
     window.speechSynthesis.cancel();
-    setTimeout(() => speakParagraph(currentIdx), 100);
+    setTimeout(() => speakParagraph(ci), 100);
   }
 }
 
+function changeRadioMode(sel) {
+  radio.mode = sel.value;
+  localStorage.setItem('pntt_radioMode', radio.mode);
+  // Show/hide voice selector
+  const vg = document.getElementById('radioVoiceGroup');
+  if (vg) vg.style.display = (radio.mode === 'google') ? 'none' : '';
+}
+
+// ===== MAIN SPEAK FUNCTION =====
 function speakParagraph(index) {
   if (!radio.active) return;
-  if (index >= radio.paragraphs.length) {
-    // Hết chương
-    finishRadioChapter();
-    return;
-  }
+  if (index >= radio.paragraphs.length) { finishRadioChapter(); return; }
 
   radio.currentIndex = index;
   const text = radio.paragraphs[index];
-  if (!text || !text.trim()) {
-    speakParagraph(index + 1);
-    return;
-  }
+  if (!text || !text.trim()) { speakParagraph(index + 1); return; }
 
-  // Highlight paragraph
   highlightParagraph(index);
 
+  if (radio.mode === 'google') {
+    speakWithGoogle(text, index);
+  } else {
+    speakWithBrowser(text, index);
+  }
+}
+
+// ===== BROWSER TTS (Web Speech API) =====
+function speakWithBrowser(text, index) {
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = 'vi-VN';
   utterance.rate = radio.speed;
@@ -555,87 +557,145 @@ function speakParagraph(index) {
 
   utterance.onstart = () => {
     radio.utterance = utterance;
-    $('radioPlayPause').textContent = '⏸';
-    // Animate wave
-    $('radioWave').classList.add('active');
+    setRadioPlaying(true);
   };
-
-  utterance.onend = () => {
-    speakParagraph(index + 1);
-  };
-
-  utterance.onerror = () => {
-    console.error('Speech error, skipping paragraph', index);
-    speakParagraph(index + 1);
-  };
+  utterance.onend = () => { speakParagraph(index + 1); };
+  utterance.onerror = () => { speakParagraph(index + 1); };
 
   window.speechSynthesis.speak(utterance);
 }
 
-function highlightParagraph(index) {
-  // Remove all highlights
-  document.querySelectorAll('.reader-content p.speaking').forEach(p => p.classList.remove('speaking'));
+// ===== GOOGLE TTS (free, no key) =====
+function speakWithGoogle(text, paraIdx) {
+  setRadioPlaying(true);
 
-  const allParagraphs = document.querySelectorAll('.reader-content p');
-  if (allParagraphs[index]) {
-    allParagraphs[index].classList.add('speaking');
-    // Scroll into view smoothly
-    allParagraphs[index].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Split into 200-char chunks (Google limit)
+  const MAX = 200;
+  const chunks = [];
+  for (let i = 0; i < text.length; i += MAX) {
+    chunks.push(text.substring(i, i + MAX));
+  }
+
+  radio.googleChunks = chunks;
+  radio.googleChunkIdx = 0;
+  playGoogleChunk(paraIdx, 0);
+}
+
+function playGoogleChunk(paraIdx, chunkIdx) {
+  if (!radio.active) return;
+  const chunks = radio.googleChunks;
+  if (chunkIdx >= chunks.length) {
+    // Done with this paragraph, move to next
+    speakParagraph(paraIdx + 1);
+    return;
+  }
+
+  const text = chunks[chunkIdx];
+  const url = GOOGLE_TTS + encodeURIComponent(text);
+
+  // Create audio element
+  const audio = new Audio(url);
+  radio.googleAudio = audio;
+
+  audio.onended = () => {
+    if (radio.active && chunkIdx + 1 < chunks.length) {
+      playGoogleChunk(paraIdx, chunkIdx + 1);
+    } else if (radio.active) {
+      speakParagraph(paraIdx + 1);
+    }
+  };
+
+  audio.onerror = () => {
+    // If Google TTS fails, fallback to browser TTS
+    console.warn('Google TTS failed, fallback to browser TTS');
+    radio.mode = 'browser';
+    const modeSel = $('radioMode');
+    if (modeSel) modeSel.value = 'browser';
+    speakWithBrowser(radio.paragraphs[paraIdx], paraIdx);
+  };
+
+  audio.play().catch(() => {
+    // Fallback
+    radio.mode = 'browser';
+    const modeSel = $('radioMode');
+    if (modeSel) modeSel.value = 'browser';
+    speakWithBrowser(radio.paragraphs[paraIdx], paraIdx);
+  });
+}
+
+// ===== UI HELPERS =====
+function setRadioPlaying(playing) {
+  $('radioPlayPause').textContent = playing ? '\u23F8' : '\u25B6';
+  if (playing) {
+    $('radioWave').classList.add('active');
+  } else {
+    $('radioWave').classList.remove('active');
+  }
+}
+
+function highlightParagraph(index) {
+  document.querySelectorAll('.reader-content p.speaking').forEach(p => p.classList.remove('speaking'));
+  const allP = document.querySelectorAll('.reader-content p');
+  if (allP[index]) {
+    allP[index].classList.add('speaking');
+    allP[index].scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 }
 
 function toggleRadioPlayPause() {
+  if (radio.mode === 'google') {
+    // Google mode: just stop/restart (no pause for audio elements)
+    if (radio.googleAudio && !radio.googleAudio.paused) {
+      radio.googleAudio.pause();
+      setRadioPlaying(false);
+    } else if (radio.googleAudio) {
+      radio.googleAudio.play();
+      setRadioPlaying(true);
+    }
+    return;
+  }
+
+  // Browser mode
   if (window.speechSynthesis.paused) {
     window.speechSynthesis.resume();
-    $('radioPlayPause').textContent = '⏸';
-    $('radioWave').classList.add('active');
+    setRadioPlaying(true);
   } else if (window.speechSynthesis.speaking) {
     window.speechSynthesis.pause();
-    $('radioPlayPause').textContent = '▶';
-    $('radioWave').classList.remove('active');
+    setRadioPlaying(false);
   }
 }
 
 function stopRadio() {
   radio.active = false;
   window.speechSynthesis.cancel();
+  if (radio.googleAudio) { radio.googleAudio.pause(); radio.googleAudio = null; }
   radio.utterance = null;
 
   const btn = $('radioBtn');
   const player = $('radioPlayer');
-  btn.textContent = '🎧';
+  btn.textContent = '\uD83C\uDFA7';
   btn.classList.remove('active');
   player.style.display = 'none';
   $('radioWave').classList.remove('active');
-
-  // Remove highlights
   document.querySelectorAll('.reader-content p.speaking').forEach(p => p.classList.remove('speaking'));
 }
 
 function finishRadioChapter() {
   if (!radio.active) return;
-  
-  // Remove highlights
   document.querySelectorAll('.reader-content p.speaking').forEach(p => p.classList.remove('speaking'));
   $('radioWave').classList.remove('active');
-  $('radioPlayPause').textContent = '✓';
-  $('radioInfo').textContent = '✅ Đã phát xong chương này';
+  $('radioPlayPause').textContent = '\u2713';
+  $('radioInfo').textContent = 'Dã phat xong chuong nay';
 
-  // Tự động sang chương sau
   setTimeout(() => {
     const total = state.index[state.index.length - 1].e;
     if (state.currentChapter && state.currentChapter.c < total) {
       nextChapter();
-      // Auto-start radio on next chapter
-      setTimeout(() => {
-        if (!radio.active) {
-          toggleRadio();
-        }
-      }, 1000);
+      setTimeout(() => { if (!radio.active) toggleRadio(); }, 1000);
     } else {
-      showToast('🎉 Đã đọc xong toàn bộ truyện!');
+      showToast('Da doc xong toan bo truyen!');
       radio.active = false;
-      $('radioBtn').textContent = '🎧';
+      $('radioBtn').textContent = '\uD83C\uDFA7';
       $('radioBtn').classList.remove('active');
     }
   }, 1500);
@@ -643,24 +703,25 @@ function finishRadioChapter() {
 
 function changeRadioSpeed(sel) {
   radio.speed = parseFloat(sel.value);
-  // Nếu đang phát, restart paragraph hiện tại với tốc độ mới
-  if (radio.active && window.speechSynthesis.speaking) {
-    const currentIdx = radio.currentIndex;
-    window.speechSynthesis.cancel();
-    setTimeout(() => speakParagraph(currentIdx), 100);
+  if (radio.active) {
+    const ci = radio.currentIndex;
+    if (radio.mode === 'browser' && window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+      setTimeout(() => speakParagraph(ci), 100);
+    }
   }
 }
 
-// Dừng radio nếu chuyển chương bằng tay
+// Stop radio when changing chapters
 const _origGoToChapter = goToChapter;
 goToChapter = function(num) {
   if (radio.active) stopRadio();
   _origGoToChapter(num);
 };
 
-// Pre-load voices list
+// Pre-load voices
 window.speechSynthesis.getVoices();
-window.speechSynthesis.onvoiceschanged = () => { window.speechSynthesis.getVoices(); };
+window.speechSynthesis.onvoiceschanged = () => { window.speechSynthesis.getVoices(); populateVoiceList(); };
 
 // ===== START =====
 document.addEventListener('DOMContentLoaded', init);
